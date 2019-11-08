@@ -1,0 +1,186 @@
+#include "com_app.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <linux/netlink.h>
+#include <sys/types.h>
+#include <asm/types.h>
+#include <linux/socket.h>
+#include <errno.h>
+
+#define MAX_PAYLOAD 1024
+#define NETLINK_TEST 25
+
+void my_getline(char* line, int max_size)
+{
+    int c;
+    int len = 0;
+    while( len < max_size && (c = getchar()) != EOF   )
+    {
+        line[len++] = c;
+        if('\n' == c)
+            break;
+    }
+}
+
+int main(int argc, char *argv[])
+{
+
+    int state;
+    struct sockaddr_nl src_addr, dest_addr;
+    struct nlmsghdr *nlh = NULL;
+    struct iovec iov;
+    struct msghdr msg;
+    int sock_fd, retval;
+    int state_smg = 0;
+    int flag=0,passflag=0;
+
+    // Create a socket
+    sock_fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_TEST);
+    if(sock_fd == -1)
+    {
+        printf("error getting socket: %s\n", strerror(errno));
+        return -1;
+    }
+
+    // To prepare binding
+    memset(&src_addr, 0, sizeof(src_addr));
+    src_addr.nl_family = AF_NETLINK;
+    src_addr.nl_pid = getpid(); //Set source port
+    src_addr.nl_groups = 0;
+
+    //Bind
+    retval = bind(sock_fd, (struct sockaddr*)&src_addr, sizeof(src_addr));
+    if (retval < 0)
+    {
+        printf("bind failed: %s", strerror(errno));
+        close(sock_fd);
+        return -1;
+    }
+
+    // To orepare create mssage
+    nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MAX_PAYLOAD));
+    if (!nlh)
+    {
+        printf("malloc nlmsghdr error!\n");
+        close(sock_fd);
+        return -1;
+    }
+    memset(&dest_addr,0,sizeof(dest_addr));
+    dest_addr.nl_family = AF_NETLINK;
+    dest_addr.nl_pid = 0; //Set target Port
+    dest_addr.nl_groups = 0;
+    nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
+    nlh->nlmsg_pid = getpid(); //Set source port
+    nlh->nlmsg_flags = 0;
+//
+
+
+    int max_size = 266;
+    char str[267],tempid[5]= {'\0'};
+    char tempeat = '\0';
+    int bol=0;
+    int inipid=0,thispid = 0;
+    for(int i=0; i<267; i++)
+    {
+        str[i] = '\0';
+    }
+//“Registration. id=[id], type=[type]//
+    strcat(str,"Registration. id=");
+    strcat(str, argv[1]);
+    strcat(str, ", type=");
+    strcat(str, argv[2]);
+
+    while(strcmp(str, "End") != 0)
+    {
+        if(!flag && !passflag)
+        {
+            strcpy(NLMSG_DATA(nlh), str); //設定訊息體
+
+            iov.iov_base = (void *)nlh;
+            iov.iov_len = NLMSG_SPACE(MAX_PAYLOAD);
+
+            //Create message
+            memset(&msg, 0, sizeof(msg));
+            msg.msg_name = (void *)&dest_addr;
+            msg.msg_namelen = sizeof(dest_addr);
+            msg.msg_iov = &iov;
+            msg.msg_iovlen = 1;
+
+            //send message
+            state_smg = sendmsg(sock_fd,&msg,0);
+            if (state_smg == -1)
+            {
+                printf("get error sendmsg = %s\n",strerror(errno));
+            }
+            memset(nlh, 0, NLMSG_SPACE(MAX_PAYLOAD));
+            //receive message
+            //printf("waiting received!\n");
+            state = recvmsg(sock_fd, &msg, 0);
+            if (state < 0)
+            {
+                printf("state<1");
+            }
+            if(strcmp(str,(char*)NLMSG_DATA(nlh)) !=0)
+            {
+                printf("%s\n", (char*)NLMSG_DATA(nlh));
+            }
+            nlh->nlmsg_pid = getpid();
+            nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
+            nlh->nlmsg_pid = getpid(); //設定源埠
+            nlh->nlmsg_flags = 0;
+            if(!bol && strcmp("FAIL",(char*)NLMSG_DATA(nlh))==0)
+            {
+                return 0;
+            }
+
+        }
+        passflag = 0;
+        for(int i=0; i<267; i++)
+        {
+            str[i] = '\0';
+        }
+
+
+        my_getline(str, max_size);
+
+        if((str[strlen(str)-1]) != '\n')
+        {
+            while ((tempeat = getchar()) != '\n' )
+            {
+                ;
+            }
+            printf("Please Reduce Your Message Length!! However, transfer first 255 char ");
+
+        }
+        else
+        {
+            str[strlen(str)-1] = '\0';
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            tempid[i] = str[i];
+        }
+        if(strcmp(tempid,"Recv") == 0)
+        {
+            strcat(str, argv[1]);
+            inipid = atoi(argv[1]);
+            if(sscanf(str,"Recv%d",&thispid) != -1)
+            {
+                if(thispid != inipid)
+                {
+                    printf("Not Your ID\n");
+                    strcpy(str, "WRONG");
+                }
+            }
+        }
+        str[265] = '\0';
+        bol = 1;
+    }
+    close(sock_fd);
+    return 0;
+}

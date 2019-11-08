@@ -1,0 +1,1 @@
+cmd_/home/shimj/hw1-process-communication-s08glen/module/com_kmodule.ko := ld -r -m elf_x86_64  -z max-page-size=0x200000 -T ./scripts/module-common.lds  --build-id  -o /home/shimj/hw1-process-communication-s08glen/module/com_kmodule.ko /home/shimj/hw1-process-communication-s08glen/module/com_kmodule.o /home/shimj/hw1-process-communication-s08glen/module/com_kmodule.mod.o ;  true

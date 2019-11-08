@@ -1,0 +1,341 @@
+#include "com_kmodule.h"
+#include <linux/netlink.h>
+#include <linux/socket.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <net/sock.h>
+#include <net/netlink.h>
+#include <linux/skbuff.h>
+#include <linux/timer.h>
+#include <linux/time.h>
+#include <linux/types.h>
+#include <linux/timer.h>
+#include <linux/time.h>
+#include <linux/types.h>
+#include <linux/string.h>
+
+
+#define NETLINK_TEST 25
+#define MAX_MSGSIZE 1024
+typedef struct mailbox Mailbox;
+typedef struct msg_data Msg;
+int inibool=0;
+Mailbox mb[1001];
+int used[1001]= {0};
+
+struct sock *nl_sk = NULL;
+
+void substring(char s[], char sub[], int p, int l)
+{
+    int c = 0;
+
+    while (c < l)
+    {
+        sub[c] = s[p+c];
+        c++;
+    }
+    sub[c] = '\0';
+}
+
+int atoi(char s[])
+{
+    char* aattooii;
+    int pppid = 0;
+    aattooii = s;
+    while(*aattooii != '\0')
+    {
+        pppid*=10;
+        pppid += *aattooii -'0';
+        aattooii++;
+    }
+    return pppid;
+}
+
+size_t strlen(const char *str)
+{
+    size_t i;
+
+    for (i = 0; str[i]; i++);
+    return i;
+}
+
+void send_msg(char *message, int pid)
+{
+    struct sk_buff *skb;
+    struct nlmsghdr *nlh;
+    int len = NLMSG_SPACE(MAX_MSGSIZE);
+
+    if (!message || !nl_sk)
+    {
+        return;
+    }
+    printk(KERN_INFO "pid:%d\n", pid);
+    skb = alloc_skb(len, GFP_KERNEL);
+    if (!skb)
+    {
+        printk(KERN_ERR "send_msg:alloc_skb error\n");
+        return;
+    }
+    nlh = nlmsg_put(skb, 0, 0, 0, MAX_MSGSIZE, 0);
+    NETLINK_CB(skb).portid = 0;
+    NETLINK_CB(skb).dst_group = 0;
+    strcpy(NLMSG_DATA(nlh), message);
+    printk(KERN_INFO "my_net_link:send message '%s'.\n",(char *)NLMSG_DATA(nlh));
+    netlink_unicast(nl_sk, skb, pid, MSG_DONTWAIT);
+}
+
+void recv_nlmsg(struct sk_buff *skb)
+{
+    int pid;
+    char sb[4],idd[4],msg[512],type[10];
+    int str_space = 0,pppid = 0,str_lth = 0,sec_space = 0;
+    int i=0;
+    Msg *temp;
+
+    struct nlmsghdr *nlh = nlmsg_hdr(skb);
+
+    if (nlh->nlmsg_len < NLMSG_HDRLEN || skb->len < nlh->nlmsg_len)
+        return;
+
+    printk(KERN_INFO "Message received:%s\n", (char*)NLMSG_DATA(nlh));
+    pid = nlh->nlmsg_pid;
+//
+
+
+    if(inibool==0)
+    {
+
+        for(i=0; i<1001; i++)
+        {
+            mb[i].msg_data_head = NULL;
+            mb[i].msg_data_tail = NULL;
+            used[i] = 0;
+            mb[i].msg_data_count = 0;
+        }
+        inibool=1;
+    }
+
+    sb[0]='t';
+    sb[1]='x';
+    sb[2]='t';
+    sb[3]='t';
+    idd[0]='0';
+    idd[1]='0';
+    idd[2]='0';
+    idd[3]='0';
+
+    substring((char*)NLMSG_DATA(nlh),sb,0,3);
+    if(strcmp(sb, "Sen") == 0)  //instruction Send
+    {
+        int sendtoid = 0;
+        if(sscanf(((char*)NLMSG_DATA(nlh)),"Send %d %256s",&sendtoid,msg) != -1)
+        {
+            if (sendtoid >1000)
+            {
+                strcpy((char*)NLMSG_DATA(nlh),"ID Must <= 1000");
+                send_msg((char*)NLMSG_DATA(nlh), pid);
+                return;
+            }
+
+            printk(KERN_INFO "Send msg: %s\nppid: %d\n",msg,sendtoid);
+        }
+        for (i=0; i<strlen((char*)NLMSG_DATA(nlh)); ++i)
+        {
+            if(str_space >= 2)
+            {
+                ++str_lth;
+            }
+            if(((char*)NLMSG_DATA(nlh))[i] == ' ')
+            {
+                ++str_space;
+            }
+            if(str_space == 2)
+            {
+                sec_space = i;
+                str_space = 3;
+            }
+
+        }
+        substring((char*)NLMSG_DATA(nlh),msg,sec_space+1,str_lth);
+        if(str_lth>270)
+        {
+            strcpy((char*)NLMSG_DATA(nlh),"Please Reduce Your Message Length!!");
+            send_msg((char*)NLMSG_DATA(nlh), pid);
+            return;
+        }
+
+        if(mb[sendtoid].type == '1')  // queued
+        {
+
+            Msg *p = kmalloc(sizeof(Msg),GFP_KERNEL);
+            for(i=0;i<255;i++){
+                p->buf[i] = msg[i];
+            }
+            p->buf[255] = '\0';
+            //strcpy(p->buf, msg);
+            p->next = NULL;
+            if(mb[sendtoid].msg_data_head == NULL && mb[sendtoid].msg_data_tail == NULL)
+            {
+                mb[sendtoid].msg_data_head = p;
+                mb[sendtoid].msg_data_tail = p;
+                mb[sendtoid].msg_data_count = 1;
+                strcpy((char*)NLMSG_DATA(nlh),"Success");
+            }
+            else
+            {
+                if(mb[sendtoid].msg_data_count > 2)
+                {
+                    strcpy((char*)NLMSG_DATA(nlh),"FAIL");
+                }
+                else
+                {
+                    mb[sendtoid].msg_data_tail->next = p;
+                    mb[sendtoid].msg_data_tail = p;
+                    mb[sendtoid].msg_data_count ++ ;
+                    strcpy((char*)NLMSG_DATA(nlh),"Success");
+                }
+
+            }
+        }
+        else  //unqueued
+        {
+            Msg *p = kmalloc(sizeof(Msg),GFP_KERNEL);
+            for(i=0;i<255;i++){
+                p->buf[i] = msg[i];
+            }
+            p->buf[255] = '\0';
+            //strcpy(p->buf, msg);
+            p->next = NULL;
+            mb[sendtoid].msg_data_head = p;
+            mb[sendtoid].msg_data_tail = NULL;
+            strcpy((char*)NLMSG_DATA(nlh),"Success");
+        }
+
+    }
+    else if(strcmp(sb, "Rec") == 0)   //instruction Recv
+    {
+        if(sscanf(((char*)NLMSG_DATA(nlh)),"Recv %d",&pppid) != -1)
+        {
+        }
+        if(mb[pppid].type == '1')  // queued
+        {
+            if(mb[pppid].msg_data_head == NULL && mb[pppid].msg_data_tail == NULL)
+            {
+                strcpy((char*)NLMSG_DATA(nlh),"FAIL");
+            }
+            else
+            {
+                strcpy((char*)NLMSG_DATA(nlh),mb[pppid].msg_data_head->buf); // 2up
+                temp = mb[pppid].msg_data_head ;
+                mb[pppid].msg_data_head = mb[pppid].msg_data_head->next;
+                if(mb[pppid].msg_data_head == NULL)
+                {
+                    mb[pppid].msg_data_tail = NULL;
+                }
+                kfree(temp);
+                mb[pppid].msg_data_count -- ;
+            }
+
+        }
+        else  // unqueued
+        {
+            if(mb[pppid].msg_data_head == NULL)
+            {
+                strcpy((char*)NLMSG_DATA(nlh),"FAIL");
+            }
+            else
+            {
+                strcpy((char*)NLMSG_DATA(nlh),mb[pppid].msg_data_head->buf);
+            }
+
+        }
+
+
+    }
+
+    else if(strcmp(sb, "Reg") == 0)       // instruction Regi
+    {
+        if(sscanf(((char*)NLMSG_DATA(nlh)),"Registration. id=%d, type=%s",&pppid,type) != -1)
+        {
+            printk(KERN_INFO "rsgtype: %s\npppid: %d\n",type,pppid);
+            if(used[pppid] == 0)
+            {
+                used[pppid] = 1;
+                if(strcmp(type,"queued") == 0)
+                {
+                    mb[pppid].type = '1';
+                }
+                if(strcmp(type,"unqueued") == 0)
+                {
+                    mb[pppid].type = '0';
+                }
+                strcpy((char*)NLMSG_DATA(nlh),"Success");
+            }
+            else //reg fail
+            {
+                strcpy((char*)NLMSG_DATA(nlh),"FAIL");
+                send_msg((char*)NLMSG_DATA(nlh), pid);
+                return;
+            }
+            if(pppid > 1000 || pppid <= 0)
+            {
+                strcpy((char*)NLMSG_DATA(nlh),"FAIL");
+                send_msg((char*)NLMSG_DATA(nlh), pid);
+                return;
+            }
+
+        }
+
+    }
+
+    else
+    {
+        strcpy((char*)NLMSG_DATA(nlh),"WRONG TYPE");
+    }
+
+
+
+
+
+//
+    send_msg((char*)NLMSG_DATA(nlh), pid);
+}
+
+struct netlink_kernel_cfg nl_kernel_cfg =
+{
+    .groups = 0,
+    .flags = 0,
+    .input = recv_nlmsg,
+    .cb_mutex = NULL,
+    .bind = NULL,
+    .compare = NULL,
+};
+
+static int __init com_kmodule_init(void)
+{
+    nl_sk = netlink_kernel_create(&init_net, NETLINK_TEST, &nl_kernel_cfg);
+    if (!nl_sk)
+    {
+        printk(KERN_ERR "my_net_link: create netlink socket error.\n");
+        return 1;
+    }
+    printk(KERN_INFO "Enter module. Hello world!\n");
+    return 0;
+}
+
+static void __exit com_kmodule_exit(void)
+{
+    if (nl_sk != NULL)
+    {
+        sock_release(nl_sk->sk_socket);
+    }
+    printk(KERN_INFO "Exit module. Bye~\n");
+}
+
+
+
+module_init(com_kmodule_init);
+module_exit(com_kmodule_exit);
+MODULE_AUTHOR("s08glen");
+MODULE_LICENSE("GPL");
